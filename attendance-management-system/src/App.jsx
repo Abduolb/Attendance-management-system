@@ -1,10 +1,24 @@
 import { useState, useEffect } from 'react';
 import './App.css';
 
+const FingerprintService = {
+    captureTemplate: () => new Promise((resolve, reject) => {
+        setTimeout(() => {
+            if (Math.random() > 0.1) resolve('MOCK-TEMPLATE-DATA-12345');
+            else reject(new Error('Scanner error. Wipe sensor and try again.'));
+        }, 2000);
+    }),
+    matchTemplates: (scannedTemplate, registeredTemplate) => new Promise((resolve) => {
+        setTimeout(() => {
+            resolve(scannedTemplate === registeredTemplate);
+        }, 500);
+    })
+};
+
 const DEFAULT_USERS = [
-    { id: 1, username: 'admin', password: 'admin123', name: 'System Admin', role: 'Admin' },
-    { id: 2, username: 'Ag', password: 'pass123', name: 'Abdulganiyu ahmad balele', role: 'NJFP' },
-    { id: 3, username: 'Abdullahi murtala', password: 'pass123', name: 'Abdullahi murtala', role: 'NJFP' }
+    { id: 1, username: 'admin', password: 'admin123', name: 'System Admin', role: 'Admin', fingerprintTemplate: 'MOCK-TEMPLATE-DATA-12345' },
+    { id: 2, username: 'Ag', password: 'pass123', name: 'Abdulganiyu ahmad balele', role: 'NJFP', fingerprintTemplate: 'MOCK-TEMPLATE-DATA-12345' },
+    { id: 3, username: 'Abdullahi murtala', password: 'pass123', name: 'Abdullahi murtala', role: 'NJFP', fingerprintTemplate: 'MOCK-TEMPLATE-DATA-12345' }
 ];
 
 export default function App() {
@@ -27,6 +41,7 @@ export default function App() {
     const [authView, setAuthView] = useState('login'); // 'login' | 'signup'
     const [currentView, setCurrentView] = useState('dashboard');
     const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
+    const [fpModal, setFpModal] = useState({ show: false, type: null, status: 'idle', message: '' });
 
     // Live Clock & Date
     const [currentTime, setCurrentTime] = useState(new Date());
@@ -79,7 +94,7 @@ export default function App() {
             return;
         }
 
-        setUsersDb([...usersDb, { id: Date.now(), username, password, name, role }]);
+        setUsersDb([...usersDb, { id: Date.now(), username, password, name, role, fingerprintTemplate: 'MOCK-TEMPLATE-DATA-12345' }]);
         showToastMsg('Account created! Please Sign In.');
         setAuthView('login');
     };
@@ -96,12 +111,67 @@ export default function App() {
         </div>
     );
 
+    const handleFingerprintScan = async (type) => {
+        setFpModal({ show: true, type, status: 'scanning', message: 'Place finger on the hardware scanner...' });
+        
+        try {
+            const scannedTemplate = await FingerprintService.captureTemplate();
+            setFpModal(prev => ({ ...prev, status: 'matching', message: 'Matching template...' }));
+            
+            const isMatch = await FingerprintService.matchTemplates(scannedTemplate, currentUser.fingerprintTemplate);
+            
+            if (isMatch) {
+                setFpModal(prev => ({ ...prev, status: 'success', message: 'Identity verified!' }));
+                
+                setTimeout(() => {
+                    const record = {
+                        userId: currentUser.id,
+                        type,
+                        date: currentTime.toLocaleDateString(),
+                        time: currentTime.toLocaleTimeString(),
+                        timestamp: currentTime.getTime()
+                    };
+                    setAttendanceDb(prev => [...prev, record]);
+                    showToastMsg(`${type} Recorded Successfully`);
+                    setFpModal({ show: false, type: null, status: 'idle', message: '' });
+                }, 1000);
+            } else {
+                setFpModal(prev => ({ ...prev, status: 'error', message: 'Fingerprint mismatch. Try again.' }));
+                setTimeout(() => setFpModal({ show: false, type: null, status: 'idle', message: '' }), 2000);
+            }
+        } catch (err) {
+            setFpModal(prev => ({ ...prev, status: 'error', message: err.message }));
+            setTimeout(() => setFpModal({ show: false, type: null, status: 'idle', message: '' }), 2000);
+        }
+    };
+
+    const renderFingerprintModal = () => {
+        if (!fpModal.show) return null;
+        
+        let iconColor = 'var(--primary)';
+        if (fpModal.status === 'success') iconColor = '#10b981';
+        if (fpModal.status === 'error') iconColor = '#ef4444';
+
+        return (
+            <div className={`modal-overlay ${fpModal.show ? 'show' : ''}`}>
+                <div className="modal-content">
+                    <div className={`fingerprint-icon ${fpModal.status === 'scanning' ? 'scanning' : ''}`} style={{ color: iconColor }}>
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12Z" strokeDasharray="2 4"/><path d="M9 8C9 8 10.5 7 12 7C13.5 7 15 8 15 8" /><path d="M8 11C8 11 10 9.5 12 9.5C14 9.5 16 11 16 11" /><path d="M7.5 14C7.5 14 9.5 12 12 12C14.5 12 16.5 14 16.5 14" /><path d="M8 17C8 17 10 15 12 15C14 15 16 17 16 17" /></svg>
+                    </div>
+                    <h3 className="modal-title">{fpModal.type} Authentication</h3>
+                    <p className="modal-text">{fpModal.message}</p>
+                    <button className="btn btn-secondary mt-4" onClick={() => setFpModal({ show: false, type: null, status: 'idle', message: '' })}>Cancel</button>
+                </div>
+            </div>
+        );
+    };
+
     const renderAuthPage = () => (
         <div id="authPage" className="login-wrapper">
             {authView === 'login' ? (
                 <div className="auth-card">
                     <div className="brand-logo">
-                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                        <img src="/lumilab.png" alt="Lumilab Logo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
                         LUMILAB
                     </div>
                     <h3 style={{ textAlign: 'center', marginBottom: '1.5rem', fontWeight: 600 }}>Sign In</h3>
@@ -123,7 +193,7 @@ export default function App() {
             ) : (
                 <div className="auth-card">
                     <div className="brand-logo">
-                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                        <img src="/lumilab.png" alt="Lumilab Logo" style={{ width: '40px', height: '40px', objectFit: 'contain' }} />
                         LUMILAB
                     </div>
                     <h3 style={{ textAlign: 'center', marginBottom: '1.5rem', fontWeight: 600 }}>Create Account</h3>
@@ -238,15 +308,7 @@ export default function App() {
         const todayLogs = attendanceDb.filter(a => a.userId === currentUser.id && a.date === currentTime.toLocaleDateString());
 
         const markAttendance = (type) => {
-            const record = {
-                userId: currentUser.id,
-                type,
-                date: currentTime.toLocaleDateString(),
-                time: currentTime.toLocaleTimeString(),
-                timestamp: currentTime.getTime()
-            };
-            setAttendanceDb([...attendanceDb, record]);
-            showToastMsg(`${type} Recorded Successfully`);
+            handleFingerprintScan(type);
         };
 
         return (
@@ -493,12 +555,12 @@ export default function App() {
                                     return (
                                         <tr key={leave.id}>
                                             <td>
-                                                <div style={{ fontWeight: 600, color: 'white' }}>{user ? user.name : 'Unknown'}</div>
+                                                <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{user ? user.name : 'Unknown'}</div>
                                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>ID: {leave.userId}</div>
                                             </td>
                                             <td>
                                                 <div style={{ fontWeight: 600 }}>{leave.type}</div>
-                                                <div style={{ fontSize: '0.85rem', color: '#cbd5e1' }}>{leave.start} to {leave.end}</div>
+                                                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{leave.start} to {leave.end}</div>
                                             </td>
                                             <td>{leave.reason}</td>
                                             <td><span className={`badge ${statusClass}`}>{leave.status}</span></td>
@@ -538,7 +600,7 @@ export default function App() {
                                     const user = usersDb.find(u => u.id === act.userId);
                                     return (
                                         <tr key={i}>
-                                            <td><div style={{ fontWeight: 600, color: 'white' }}>{user ? user.name : 'Unknown'}</div></td>
+                                            <td><div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{user ? user.name : 'Unknown'}</div></td>
                                             <td><span className="badge badge-neutral">{user ? user.role : '-'}</span></td>
                                             <td>{act.date}</td>
                                             <td><span className={`badge ${act.type === 'Check In' ? 'badge-primary' : 'badge-warning'}`}>{act.type}</span></td>
@@ -557,13 +619,14 @@ export default function App() {
     return (
         <>
             {renderToast()}
+            {renderFingerprintModal()}
             {!currentUser ? (
                 renderAuthPage()
             ) : (
                 <div id="appContainer" className="app-container">
                     <aside className="sidebar">
                         <div className="brand-logo" style={{ flexDirection: 'row', justifyContent: 'flex-start', fontSize: '1.2rem', gap: '15px' }}>
-                            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+                            <img src="/lumilab.png" alt="Lumilab Logo" style={{ width: '32px', height: '32px', objectFit: 'contain' }} />
                             <span>LUMILAB</span>
                         </div>
                         <ul className="nav-menu">
@@ -603,7 +666,7 @@ export default function App() {
                         <div className="user-profile">
                             <div className="avatar">{currentUser.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}</div>
                             <div style={{ flex: 1, overflow: 'hidden' }}>
-                                <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'white', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{currentUser.name}</div>
+                                <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-main)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>{currentUser.name}</div>
                                 <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{currentUser.role}</div>
                             </div>
                             <button className="btn" style={{ background: 'rgba(255,255,255,0.05)', padding: '8px', color: '#ef4444' }} onClick={handleLogout} title="Logout">
